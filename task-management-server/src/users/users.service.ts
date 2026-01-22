@@ -1,10 +1,11 @@
-import { ConflictException, Injectable, InternalServerErrorException } from '@nestjs/common';
+import { ConflictException, Injectable, InternalServerErrorException, UnauthorizedException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from './users.entity';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { RedisCacheService } from 'src/redis-cache/redis-cache.service';
+import { LoginDTO } from './login.dto';
 
 @Injectable()
 export class UsersService {
@@ -14,6 +15,8 @@ export class UsersService {
         private readonly jwtService: JwtService,
         private readonly cacheService: RedisCacheService,
     ) { }
+
+
 
     async userRegistration(userData: Partial<User>): Promise<{ user: Partial<User>, token: string }> {
         try {
@@ -63,6 +66,65 @@ export class UsersService {
     };
 
 
-    async
+    async userLogin(
+        loginDto: LoginDTO,
+    ): Promise<{ user: Partial<User>; token: string }> {
+        const { email, password } = loginDto;
+
+        if (!password) {
+            throw new UnauthorizedException('Invalid credentials');
+        }
+
+        // 1️⃣ Always fetch password from DB
+        const dbUser = await this.userRepository.findOne({
+            where: { email },
+            select: ['id', 'name', 'email', 'password'],
+        });
+
+        if (!dbUser) {
+            throw new UnauthorizedException('Invalid credentials');
+        }
+
+        // 2️⃣ Always validate password
+        const isPasswordValid = await bcrypt.compare(
+            password,
+            dbUser.password,
+        );
+
+        if (!isPasswordValid) {
+            throw new UnauthorizedException('Invalid credentials');
+        }
+
+        // 3️⃣ Cache user profile (NO PASSWORD)
+        const cacheKey = `user:${email}`;
+        const cachedUser = await this.cacheService.get(cacheKey);
+
+        if (!cachedUser) {
+            await this.cacheService.set(
+                cacheKey,
+                {
+                    id: dbUser.id,
+                    name: dbUser.name,
+                    email: dbUser.email,
+                },
+                3600,
+            );
+        }
+
+        // 4️⃣ Generate JWT
+        const payload = { sub: dbUser.id, email: dbUser.email };
+        const token = this.jwtService.sign(payload);
+
+        return {
+            user: {
+                id: dbUser.id,
+                name: dbUser.name,
+                email: dbUser.email,
+            },
+            token,
+        };
+    }
+
+
 
 }
