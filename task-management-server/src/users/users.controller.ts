@@ -41,17 +41,17 @@ export class UsersController {
     }
 
 
-    @UseGuards(AuthGuard,new RolesGuard(['admin']))
+    @UseGuards(AuthGuard, new RolesGuard(['admin']))
     @Delete('user-delete/:id')
     // ☑️ users are only delete by admin
-    async delete(@Param('id') id: string, @UserDecorator() currentUser:{id:number,name:string,email:string,role:string}) {
-        const result=await this.usersService.deleteUser(id,currentUser);
+    async delete(@Param('id') id: string, @UserDecorator() currentUser: { id: string, name: string, email: string, role: string }) {
+        const result = await this.usersService.deleteUser(id, currentUser);
 
-        return{
-            statusCode:200,
-            message:result.message,
+        return {
+            statusCode: 200,
+            message: result.message,
         }
-    
+
     }
 
 }

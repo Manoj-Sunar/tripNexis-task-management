@@ -134,9 +134,6 @@ export class UsersService {
 
 
     // admin can get all user
-
-
-
     async getAllUser(
         search?: string,
         page: number = 1,
@@ -174,14 +171,14 @@ export class UsersService {
     async deleteUser(id: string, currentUser: Partial<User>): Promise<{ message: string }> {
         try {
 
-            const currentId = Number(id);
+
             // 1️⃣ Check if the current user is admin
             if (currentUser.role !== 'admin') {
                 throw new UnauthorizedException('Only admin can delete users');
             }
 
             // 2️⃣ Find the user to delete
-            const user = await this.userRepository.findOne({ where: { id: currentId } });
+            const user = await this.userRepository.findOne({ where: { id: id } });
             if (!user) {
                 throw new InternalServerErrorException('User not found');
             }
