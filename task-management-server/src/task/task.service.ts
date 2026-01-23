@@ -1,10 +1,11 @@
-import { BadRequestException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
+import { BadRequestException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Task, TaskPriority, TaskStatus } from './task.entity';
 import { DeepPartial, Repository } from 'typeorm';
 import { User } from '../users/users.entity';
 import { CreateTaskDto } from './create-task.dto';
 import { RedisCacheService } from '../redis-cache/redis-cache.service';
+import { UserDecorator } from 'src/auth/user.decorator';
 
 @Injectable()
 export class TaskService {
@@ -159,6 +160,20 @@ export class TaskService {
                 'Failed to delete task',
             );
         }
+    }
+
+
+    // update status only admin and crrent login user has change his own assign task not others
+    async updateTaskStatus(id: string, status: TaskStatus, @UserDecorator() currentUser: { id: string, role: string }) {
+        const task = await this.tasksRepository.findOne({ where: { id } });
+        if (!task) throw new NotFoundException('Task not found');
+
+        if (currentUser.role !== 'admin' && task.assignedTo.id !== currentUser.id) {
+            throw new ForbiddenException('You cannot update this task');
+        }
+
+        task.status = status;
+        return this.tasksRepository.save(task);
     }
 }
 

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Param, ParseUUIDPipe, Post, Query, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Query, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { TaskService } from './task.service';
 import { AuthGuard } from 'src/auth/auth.guard';
 import { CreateTaskDto } from './create-task.dto';
@@ -88,6 +88,14 @@ export class TaskController {
         return this.taskService.DeleteTask(id);
     }
 
+
+    // // update status only admin and crrent login user has change his own assign task not others
+    @UseGuards(AuthGuard, new RolesGuard(['user', 'admin']))
+    @Patch('/update-status/:id')
+    async updateStatus(@Param('id', ParseUUIDPipe) id: string, @Body('status') status: TaskStatus, @UserDecorator() currentUser: { id: string, role: string }) {
+
+        return this.taskService.updateTaskStatus(id, status, currentUser);
+    }
 
 
 
