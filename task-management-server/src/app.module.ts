@@ -5,8 +5,9 @@ import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from './users/users.module';
 import { TaskModule } from './task/task.module';
-import { RedisCacheService } from './redis-cache/redis-cache.service';
 import { RedisCacheModule } from './redis-cache/redis-cache.module';
+import { JwtGlobalModule } from './auth/auth.module';
+
 
 
 
@@ -26,6 +27,7 @@ import { RedisCacheModule } from './redis-cache/redis-cache.module';
     UsersModule,
     TaskModule,
     RedisCacheModule,
+    JwtGlobalModule
   ],
   controllers: [AppController],
   providers: [AppService],

@@ -7,10 +7,12 @@ import { User } from 'src/users/users.entity';
 import { UsersModule } from 'src/users/users.module';
 
 
+
 @Module({
   imports: [
     TypeOrmModule.forFeature([Task, User]), // ✅ Register repositories
     UsersModule, // ✅ Import UsersModule if you want to use UsersService
+  
   ],
   controllers: [TaskController],
   providers: [TaskService]

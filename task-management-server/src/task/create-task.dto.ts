@@ -4,7 +4,7 @@ import { TaskPriority, TaskStatus } from './task.entity';
 
 
 export class CreateTaskDto {
-    @IsNotEmpty()
+    @IsNotEmpty({message:'Title is required'})
     title: string;
 
     @IsOptional()
