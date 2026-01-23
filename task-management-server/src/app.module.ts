@@ -4,7 +4,9 @@ import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from './users/users.module';
+import { TaskModule } from './task/task.module';
 import { RedisCacheService } from './redis-cache/redis-cache.service';
+import { RedisCacheModule } from './redis-cache/redis-cache.module';
 
 
 
@@ -22,6 +24,8 @@ import { RedisCacheService } from './redis-cache/redis-cache.service';
       synchronize: true,
     }),
     UsersModule,
+    TaskModule,
+    RedisCacheModule,
   ],
   controllers: [AppController],
   providers: [AppService],
