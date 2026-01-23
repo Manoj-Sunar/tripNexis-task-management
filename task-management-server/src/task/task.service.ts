@@ -6,6 +6,7 @@ import { User } from '../users/users.entity';
 import { CreateTaskDto } from './create-task.dto';
 import { RedisCacheService } from '../redis-cache/redis-cache.service';
 import { UserDecorator } from 'src/auth/user.decorator';
+import { EditTaskDto } from './edit-task.dto';
 
 @Injectable()
 export class TaskService {
@@ -19,6 +20,8 @@ export class TaskService {
         private readonly cacheService: RedisCacheService,
     ) { }
 
+
+    // create task asssign to user only by admin
 
     async createTask(createTaskDto: CreateTaskDto, currentUser: User): Promise<Task> {
         const { title, description, status, priority, dueDate, assignedToId } = createTaskDto;
@@ -164,17 +167,144 @@ export class TaskService {
 
 
     // update status only admin and crrent login user has change his own assign task not others
-    async updateTaskStatus(id: string, status: TaskStatus, @UserDecorator() currentUser: { id: string, role: string }) {
+    async updateTaskStatus(id: string, status: TaskStatus, @UserDecorator() currentUser: { sub: string, role: string }) {
+
+
+
         const task = await this.tasksRepository.findOne({ where: { id } });
         if (!task) throw new NotFoundException('Task not found');
 
-        if (currentUser.role !== 'admin' && task.assignedTo.id !== currentUser.id) {
+
+
+        if (currentUser.role !== 'admin' && task.assignedTo?.id !== currentUser.sub) {
             throw new ForbiddenException('You cannot update this task');
         }
 
         task.status = status;
-        return this.tasksRepository.save(task);
+        const updatedStatusTask = await this.tasksRepository.save(task);
+        await this.cacheService.del(`task:${task.id}`);
+        await this.cacheService.set(`task:${updatedStatusTask.id}`, updatedStatusTask);
+        return updatedStatusTask;
     }
+
+
+    // get task by id
+    async getTaskById(id: string) {
+        try {
+
+            const catchedTask = await this.cacheService.get(`task:${id}`);
+
+            if (!catchedTask) {
+                const Task = await this.tasksRepository.findOne({ where: { id } });
+                if (!Task) {
+                    throw new NotFoundException("Task is not Found");
+                }
+
+                return Task;
+            }
+
+            return catchedTask;
+
+        } catch (error) {
+            throw new InternalServerErrorException(
+                'Failed to delete task',
+            );
+        }
+    }
+
+
+
+
+    // only admin can update task this service is only for admin
+    async updateTaskById(
+        id: string,
+        updatedData: EditTaskDto,
+        currentUser: { id: string; role: string }, // assume you pass current user info
+    ): Promise<{ message: string; task: any }> {
+        try {
+            // 0️⃣ Authorization check: only admin
+            if (currentUser.role !== 'admin') {
+                throw new ForbiddenException('Only admin can update tasks');
+            }
+
+            // 1️⃣ Find existing task with relations
+            const task = await this.tasksRepository.findOne({
+                where: { id },
+                relations: ['assignedTo', 'createdBy'],
+            });
+            if (!task) {
+                throw new NotFoundException('Task not found');
+            }
+
+            // 2️⃣ Update fields selectively
+            if (updatedData.title !== undefined) task.title = updatedData.title.trim();
+            if (updatedData.description !== undefined)
+                task.description = updatedData.description.trim();
+            if (updatedData.status !== undefined) task.status = updatedData.status;
+            if (updatedData.priority !== undefined) task.priority = updatedData.priority;
+            if (updatedData.dueDate !== undefined) {
+                const due = new Date(updatedData.dueDate);
+                if (isNaN(due.getTime())) throw new BadRequestException('Invalid dueDate');
+                task.dueDate = due;
+            }
+
+            // 3️⃣ Update assigned user if provided
+            if (updatedData.assignedToId !== undefined) {
+                if (updatedData.assignedToId === null) {
+                    task.assignedTo = null; // unassign user
+                } else {
+                    const assignedUser = await this.usersRepository.findOne({
+                        where: { id: updatedData.assignedToId },
+                    });
+                    if (!assignedUser) {
+                        throw new NotFoundException('Assigned user not found');
+                    }
+                    task.assignedTo = assignedUser;
+                }
+            }
+
+
+
+            // 5️⃣ Save updated task in DB
+            const updatedTask = await this.tasksRepository.save(task);
+
+            // 6️⃣ Cache management
+            // Invalidate single task cache
+            await this.cacheService.del(`task:${task.id}`);
+            await this.cacheService.set(`task:${task.id}`, updatedTask, 3600);
+
+            // Invalidate user-specific task cache if assigned user changed
+            if (task.assignedTo) {
+                await this.cacheService.del(`tasks:user:${task.assignedTo.id}`);
+            }
+
+            // Optionally, invalidate all tasks list cache for admins
+            const keys = await this.cacheService.getClient().keys('tasks:admin:*');
+            if (keys.length) await this.cacheService.getClient().del(keys);
+
+            // 7️⃣ Return updated task
+            return {
+                message: 'Task updated successfully',
+                task: updatedTask,
+            };
+        } catch (error) {
+            // Log internally for debugging
+            console.error('updateTaskById error:', error);
+
+            if (
+                error instanceof NotFoundException ||
+                error instanceof ForbiddenException ||
+                error instanceof BadRequestException
+            )
+                throw error;
+
+            throw new InternalServerErrorException(
+                `Failed to update task: ${error.message}`,
+            );
+        }
+    }
+
+
 }
 
 

@@ -1,10 +1,10 @@
 // src/tasks/dto/create-task.dto.ts
-import { IsNotEmpty, IsOptional, IsEnum, IsDateString } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsEnum, IsDateString, IsUUID } from 'class-validator';
 import { TaskPriority, TaskStatus } from './task.entity';
 
 
 export class CreateTaskDto {
-    @IsNotEmpty({message:'Title is required'})
+    @IsNotEmpty({ message: 'Title is required' })
     title: string;
 
     @IsOptional()
@@ -22,6 +22,6 @@ export class CreateTaskDto {
     @IsDateString()
     dueDate?: string;
 
-    @IsOptional()
-    assignedToId?: number; // User ID to assign the task
+    @IsUUID('4', { message: 'assignedToId must be a valid UUID' })
+    assignedToId?: string; // Updated to UUID for production-level
 }

@@ -1,10 +1,11 @@
-import { Body, Controller, Delete, Get, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { createUserDTO } from './user.dto';
 import { UsersService } from './users.service';
 import { LoginDTO } from './login.dto';
 import { AuthGuard } from 'src/auth/auth.guard';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { UserDecorator } from 'src/auth/user.decorator';
+import { EditUserDto } from './user-edit-dto';
 
 @Controller('users')
 export class UsersController {
@@ -52,6 +53,32 @@ export class UsersController {
             message: result.message,
         }
 
+    }
+
+
+    //Login user profile 
+    @UseGuards(AuthGuard, new RolesGuard(['user', 'admin']))
+    @Get('user-profile')
+    async LoginProfile(@UserDecorator() currentUser: { sub: string, name: string, email: string, role: string }) {
+        console.log(currentUser)
+        if (!currentUser) {
+            throw new UnauthorizedException("Unauthorized access");
+        }
+
+        return this.usersService.LoginUserProfile(currentUser);
+    }
+
+
+    // Login user can update their own profile
+    @UseGuards(AuthGuard, new RolesGuard(['user', 'admin']))
+    @Patch('login-user-edit/:id')
+    async loginUserEdit(
+        @Param('id') id: string,
+        @Body() editData: EditUserDto,
+        @UserDecorator() currentUser: { sub: string; name: string; email: string; role: string },
+    ) {
+        const updatedUser = await this.usersService.loginUserEdit(id, editData, currentUser);
+        return { message: 'Profile updated successfully', user: updatedUser };
     }
 
 }

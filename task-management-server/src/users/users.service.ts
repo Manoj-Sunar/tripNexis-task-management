@@ -1,4 +1,4 @@
-import { ConflictException, Injectable, InternalServerErrorException, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { ConflictException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from './users.entity';
 import { Repository } from 'typeorm';
@@ -6,6 +6,7 @@ import * as bcrypt from 'bcrypt';
 import { JwtService } from '@nestjs/jwt';
 import { RedisCacheService } from 'src/redis-cache/redis-cache.service';
 import { LoginDTO } from './login.dto';
+import { UserDecorator } from 'src/auth/user.decorator';
 
 
 @Injectable()
@@ -133,33 +134,47 @@ export class UsersService {
     }
 
 
-    // admin can get all user
+    // get all user this service only for admin
     async getAllUser(
         search?: string,
         page: number = 1,
         limit: number = 10,
     ): Promise<{ data: User[]; total: number; page: number; limit: number }> {
         try {
-            const query = this.userRepository.createQueryBuilder('user');
+            // 1️⃣ Generate a cache key based on parameters
+            const cacheKey = `users:search=${search || 'none'}:page=${page}:limit=${limit}`;
 
-            // 2️⃣ Apply search by name or email (case-insensitive)
+            // 2️⃣ Try to get from cache
+            const cached = await this.cacheService.get<{ data: User[]; total: number; page: number; limit: number }>(cacheKey);
+            if (cached) {
+                console.log('Returning cached data');
+                return cached;
+            }
+
+            // 3️⃣ Build query
+            const query = this.userRepository.createQueryBuilder('user');
             if (search) {
                 query.andWhere('(user.name ILIKE :search OR user.email ILIKE :search)', {
                     search: `%${search}%`,
                 });
             }
 
-            // 3️⃣ Pagination
+            // Pagination
             const skip = (page - 1) * limit;
             query.skip(skip).take(limit);
 
-            // 4️⃣ Order results
+            // Ordering
             query.orderBy('user.name', 'ASC');
 
-            // 5️⃣ Execute query
+            // 4️⃣ Execute query
             const [data, total] = await query.getManyAndCount();
 
-            return { data, total, page, limit };
+            const result = { data, total, page, limit };
+
+            // 5️⃣ Cache result for 60 seconds
+            await this.cacheService.set(cacheKey, result, 60); // TTL can be adjusted
+
+            return result;
 
         } catch (err) {
             throw new InternalServerErrorException(`Failed to fetch users: ${err.message}`);
@@ -167,7 +182,7 @@ export class UsersService {
     }
 
 
-
+    // delete user this  service only for admin
     async deleteUser(id: string, currentUser: Partial<User>): Promise<{ message: string }> {
         try {
 
@@ -194,6 +209,101 @@ export class UsersService {
         } catch (error) {
             if (error instanceof UnauthorizedException) throw error;
             throw new InternalServerErrorException(`Failed to delete user: ${error.message}`);
+        }
+    }
+
+
+    // login user can get their own profile
+    async LoginUserProfile(currentUser: { sub: string, name: string, email: string, role: string }) {
+        try {
+            const LoginUser = await this.userRepository.findOne({ where: { id: currentUser.sub } });
+
+            if (!LoginUser) {
+                throw new UnauthorizedException("Unauthorized access");
+            }
+
+            return LoginUser;
+
+        } catch (error) {
+            throw new InternalServerErrorException(`Failed to delete user: ${error.message}`);
+        }
+    }
+
+
+
+
+    async loginUserEdit(
+        userId: string,
+        editData: Partial<User>,
+        currentUser: { sub: string; name: string; email: string; role: string },
+    ): Promise<Partial<User>> {
+        try {
+            // Only allow user to edit their own profile
+            if (userId !== currentUser.sub) {
+                throw new ForbiddenException('You can only update your own profile');
+            }
+
+            // Find user
+            const user = await this.userRepository.findOne({ where: { id: userId } });
+            if (!user) {
+                throw new NotFoundException('User not found');
+            }
+
+            // Prevent critical fields from being updated
+            delete editData.role;
+            delete editData.id;
+            delete editData.createdAt;
+            delete editData.updatedAt;
+
+            // Check if email is being updated and is unique
+            if (editData.email && editData.email !== user.email) {
+                const existing = await this.userRepository.findOne({ where: { email: editData.email } });
+                if (existing) {
+                    throw new ConflictException('Email already in use');
+                }
+            }
+
+            // Hash password if updated
+            if (editData.password) {
+                editData.password = await bcrypt.hash(editData.password, 10);
+            }
+
+            // Merge and save
+            this.userRepository.merge(user, editData);
+            const updatedUser = await this.userRepository.save(user);
+
+            // Update cache
+            const cacheKey = `user:${updatedUser.email}`;
+            await this.cacheService.set(cacheKey, {
+                id: updatedUser.id,
+                name: updatedUser.name,
+                email: updatedUser.email,
+            }, 3600);
+
+            // Invalidate JWT cache if email changed
+            if (editData.email && editData.email !== currentUser.email) {
+                await this.cacheService.del(`token:${updatedUser.id}`);
+            }
+
+            // Invalidate cached admin lists
+            const keys = await this.cacheService.getClient().keys('users:*');
+            if (keys.length) await this.cacheService.getClient().del(keys);
+
+            return {
+                id: updatedUser.id,
+                name: updatedUser.name,
+                email: updatedUser.email,
+            };
+        } catch (error) {
+            if (error instanceof ForbiddenException ||
+                error instanceof NotFoundException ||
+                error instanceof ConflictException) {
+                throw error;
+            }
+            console.error(error); // Optional internal logging
+            throw new InternalServerErrorException(
+                `Failed to update user profile: ${error.message}`,
+            );
         }
     }
 

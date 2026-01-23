@@ -57,7 +57,7 @@ export class Task {
 
     // User who is ASSIGNED the task
     @ManyToOne(() => User, (user) => user.assignedTasks, { eager: true })
-    assignedTo: User;
+    assignedTo: User|null;
 
     @CreateDateColumn()
     createdAt: Date;
