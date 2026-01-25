@@ -219,7 +219,7 @@ export class TaskService {
     async updateTaskById(
         id: string,
         updatedData: EditTaskDto,
-        currentUser: { id: string; role: string }, // assume you pass current user info
+        currentUser: { sub: string; role: string }, // assume you pass current user info
     ): Promise<{ message: string; task: any }> {
         try {
             // 0️⃣ Authorization check: only admin

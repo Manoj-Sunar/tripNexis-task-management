@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { BadRequestException, ConflictException, ForbiddenException, Injectable, InternalServerErrorException, NotFoundException, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { User } from './users.entity';
 import { Repository } from 'typeorm';
@@ -75,62 +75,68 @@ export class UsersService {
     async userLogin(
         loginDto: LoginDTO,
     ): Promise<{ user: Partial<User>; token: string }> {
-        const { email, password } = loginDto;
+        try {
+            const { email, password } = loginDto;
 
-        if (!password) {
-            throw new UnauthorizedException('Invalid credentials');
-        }
+            console.log(email, password);
+            if (!password) {
+                throw new UnauthorizedException('Invalid credentials');
+            }
 
-        // 1️⃣ Always fetch password from DB
-        const dbUser = await this.userRepository.findOne({
-            where: { email },
-            select: ['id', 'name', 'email', 'password', 'role'],
-        });
+            // 1️⃣ Always fetch password from DB
+            const dbUser = await this.userRepository.findOne({
+                where: { email },
+                select: ['id', 'name', 'email', 'password', 'role'],
+            });
 
-        if (!dbUser) {
-            throw new UnauthorizedException('Invalid credentials');
-        }
+            if (!dbUser) {
+                throw new UnauthorizedException('Invalid credentials');
+            }
 
-        // 2️⃣ Always validate password
-        const isPasswordValid = await bcrypt.compare(
-            password,
-            dbUser.password,
-        );
+            // 2️⃣ Always validate password
+            const isPasswordValid = await bcrypt.compare(
+                password,
+                dbUser.password,
+            );
 
-        if (!isPasswordValid) {
-            throw new UnauthorizedException('Invalid credentials');
-        }
+            if (!isPasswordValid) {
+                throw new UnauthorizedException('Invalid credentials');
+            }
 
-        // 3️⃣ Cache user profile (NO PASSWORD)
-        const cacheKey = `user:${email}`;
-        const cachedUser = await this.cacheService.get(cacheKey);
+            // 3️⃣ Cache user profile (NO PASSWORD)
+            const cacheKey = `user:${email}`;
+            const cachedUser = await this.cacheService.get(cacheKey);
 
 
-        if (!cachedUser) {
-            await this.cacheService.set(
-                cacheKey,
-                {
+            if (!cachedUser) {
+                await this.cacheService.set(
+                    cacheKey,
+                    {
+                        id: dbUser.id,
+                        name: dbUser.name,
+                        email: dbUser.email,
+                    },
+                    3600,
+                );
+            }
+
+            // 4️⃣ Generate JWT
+            const payload = { sub: dbUser.id, email: dbUser.email, role: dbUser.role };
+
+            const token = this.jwtService.sign(payload);
+
+            return {
+                user: {
                     id: dbUser.id,
                     name: dbUser.name,
                     email: dbUser.email,
                 },
-                3600,
-            );
+                token,
+            };
+        } catch (error) {
+            console.log(error)
+            throw new InternalServerErrorException(error);
         }
-
-        // 4️⃣ Generate JWT
-        const payload = { sub: dbUser.id, email: dbUser.email, role: dbUser.role };
-
-        const token = this.jwtService.sign(payload);
-
-        return {
-            user: {
-                id: dbUser.id,
-                name: dbUser.name,
-                email: dbUser.email,
-            },
-            token,
-        };
     }
 
 
@@ -216,13 +222,22 @@ export class UsersService {
     // login user can get their own profile
     async LoginUserProfile(currentUser: { sub: string, name: string, email: string, role: string }) {
         try {
-            const LoginUser = await this.userRepository.findOne({ where: { id: currentUser.sub } });
 
-            if (!LoginUser) {
-                throw new UnauthorizedException("Unauthorized access");
+            const cachedUser = await this.cacheService.get(`user:${currentUser.email}`);
+
+            if (!cachedUser) {
+                const LoginUser = await this.userRepository.findOne({ where: { id: currentUser.sub } });
+
+                if (!LoginUser) {
+                    throw new UnauthorizedException("Unauthorized access");
+                }
+
+                return LoginUser;
             }
 
-            return LoginUser;
+            return cachedUser;
+
+
 
         } catch (error) {
             throw new InternalServerErrorException(`Failed to delete user: ${error.message}`);
@@ -231,7 +246,7 @@ export class UsersService {
 
 
 
-
+    // Login user can update his profile
     async loginUserEdit(
         userId: string,
         editData: Partial<User>,
@@ -307,5 +322,105 @@ export class UsersService {
         }
     }
 
+
+
+    async UpdateRole(
+        id: string,
+        role: string,
+        currentUser: { sub: string; role: string },
+    ): Promise<{ message: string; user: Partial<User> }> {
+        try {
+
+            console.log(role);
+
+            // 1️⃣ Only admin can update roles
+            if (currentUser.role !== 'admin') {
+                throw new ForbiddenException('Only admin can update user roles');
+            }
+
+
+
+            // 2️⃣ Prevent admin from changing their own role
+            if (currentUser.sub === id) {
+                throw new BadRequestException('You cannot change your own role');
+            }
+
+            // 3️⃣ Validate allowed roles
+            const allowedRoles = ['admin', 'user'];
+            if (!allowedRoles.includes(role)) {
+                throw new BadRequestException('Invalid role value');
+            }
+
+            // 4️⃣ Find user
+            const user = await this.userRepository.findOne({ where: { id } });
+            if (!user) {
+                throw new NotFoundException('User not found');
+            }
+
+            // 5️⃣ Skip update if role is already same
+            if (user.role === role) {
+                return {
+                    message: 'User already has this role',
+                    user: {
+                        id: user.id,
+                        name: user.name,
+                        email: user.email,
+                        role: user.role,
+                    },
+                };
+            }
+
+            // 6️⃣ Update role
+            user.role = role;
+            const updatedUser = await this.userRepository.save(user);
+
+            // 7️⃣ Cache management
+            // Update user cache
+            await this.cacheService.set(
+                `user:${updatedUser.email}`,
+                {
+                    id: updatedUser.id,
+                    name: updatedUser.name,
+                    email: updatedUser.email,
+                    role: updatedUser.role,
+                },
+                3600,
+            );
+
+            // Invalidate token so user must re-login
+            await this.cacheService.del(`token:${updatedUser.id}`);
+
+            // Invalidate admin user lists cache
+            const keys = await this.cacheService.getClient().keys('users:*');
+            if (keys.length) {
+                await this.cacheService.getClient().del(keys);
+            }
+
+            // 8️⃣ Return safe response
+            return {
+                message: 'User role updated successfully',
+                user: {
+                    id: updatedUser.id,
+                    name: updatedUser.name,
+                    email: updatedUser.email,
+                    role: updatedUser.role,
+                },
+            };
+        } catch (error) {
+            if (
+                error instanceof ForbiddenException ||
+                error instanceof NotFoundException ||
+                error instanceof BadRequestException
+            ) {
+                throw error;
+            }
+
+            console.error('UpdateRole error:', error);
+
+            throw new InternalServerErrorException(
+                `Failed to update user role: ${error.message}`,
+            );
+        }
+    }
 
 }

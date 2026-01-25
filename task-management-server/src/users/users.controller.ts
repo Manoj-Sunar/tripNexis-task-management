@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Query, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, ForbiddenException, Get, Param, ParseUUIDPipe, Patch, Post, Query, Req, UnauthorizedException, UseGuards } from '@nestjs/common';
 import { createUserDTO } from './user.dto';
 import { UsersService } from './users.service';
 import { LoginDTO } from './login.dto';
@@ -6,6 +6,7 @@ import { AuthGuard } from 'src/auth/auth.guard';
 import { RolesGuard } from 'src/auth/roles.guard';
 import { UserDecorator } from 'src/auth/user.decorator';
 import { EditUserDto } from './user-edit-dto';
+import { UpdateRoleDto } from './update-role.dto';
 
 @Controller('users')
 export class UsersController {
@@ -80,5 +81,25 @@ export class UsersController {
         const updatedUser = await this.usersService.loginUserEdit(id, editData, currentUser);
         return { message: 'Profile updated successfully', user: updatedUser };
     }
+
+
+    // Login user can update their own profile
+    @UseGuards(AuthGuard, new RolesGuard(['admin']))
+    @Patch('role-update/:id')
+
+    async RoleUpdate(@Param("id", ParseUUIDPipe) id: string, @Body() body:UpdateRoleDto, @UserDecorator() currentUser: { sub: string, role: string }) {
+
+        if (!currentUser) {
+            throw new UnauthorizedException("You need to login");
+        }
+
+        if (currentUser.role !== 'admin') {
+            throw new ForbiddenException("You are not able to change role");
+        }
+
+        return this.usersService.UpdateRole(id, body.role, currentUser);
+    }
+
+
 
 }

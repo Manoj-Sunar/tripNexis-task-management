@@ -1,0 +1,35 @@
+
+services:
+  redis:
+    image: redis:latest
+    container_name: my-redis
+    ports:
+      - "6379:6379"
+    networks:
+      - my-app-network
+
+  backend:
+    build: ./task-management-server
+    container_name: task-server
+    ports:
+      - "5000:5000"
+    env_file:
+      - ./task-management-server/.env.docker
+    depends_on:
+      - redis
+    networks:
+      - my-app-network
+
+  frontend:
+    build: ./task-management-ui
+    container_name: task-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    networks:
+      - my-app-network
+
+networks:
+  my-app-network:
+    driver: bridge

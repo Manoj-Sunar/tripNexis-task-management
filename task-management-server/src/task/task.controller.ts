@@ -130,7 +130,7 @@ export class TaskController {
             throw new ForbiddenException('you are unable to update task');
         }
 
-        return this.taskService.UpdateTaskById(id,updatedData);
+        return this.taskService.updateTaskById(id, updatedData, currentUser)
     }
 
 
